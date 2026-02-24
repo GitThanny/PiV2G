@@ -370,14 +370,14 @@ class CanNiuera:
     def getEvsePresentVoltage(self):
         """Request DC V/I and return cached voltage (V)."""
         READ_BYTE00 = self.READ_BYTE00
-        data = [READ_BYTE00, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x00, 0x00]
+        data = [READ_BYTE00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x00]
         self._send(data)
         return self.evse_present_voltage
 
     def getEvsePresentCurrent(self):
         """Request DC V/I and return cached current (A)."""
         READ_BYTE00 = self.READ_BYTE00
-        data = [READ_BYTE00, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x00, 0x00]
+        data = [READ_BYTE00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x00]
         self._send(data)
         return self.evse_present_current
 
@@ -429,7 +429,7 @@ if __name__ == "__main__":
     try:
         charger = CanNiuera(interface="socketcan", channel="can2", bitrate=125000)
         charger.start()
-        time.sleep(5)
+        time.sleep(1)
         charger.stop()
         charger.close()
         print("Test Complete.")
