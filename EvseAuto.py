@@ -7,7 +7,7 @@ from CanPhoenix import *
 from RelayControl import *
 
 class Evse():
-    # Define your button pins here
+
     START_PIN = "P8_14"
     STOP_PIN = "P8_12"
 
@@ -17,7 +17,7 @@ class Evse():
         self.relay = RelayControl("P8_17")
         self.relay.turn_on()
         self.CanPhoenix = CanPhoenix()
-        
+
         self.schedule = None
         self.evse_config = None
         self.auto_authorize = auto_authorize
@@ -55,9 +55,6 @@ class Evse():
         if hasattr(self, "whitebeet"):
             del self.whitebeet
 
-    # ==========================================
-    # PHYSICAL BUTTON INTERRUPT HANDLING
-    # ==========================================
     def _stop_button_callback(self, channel):
         """Triggered instantly when the physical STOP button is pressed."""
         print("\n[USER ABORT] Physical STOP button pressed! Canceling session and resetting...")
@@ -68,7 +65,6 @@ class Evse():
         self._force_stop_flag = True
         self.charging = False
         
-        # Safely attempt to stop the CAN loop if it was started
         try:
             self.CanPhoenix.StopCanLoop()
         except AttributeError:
@@ -78,13 +74,12 @@ class Evse():
         self.relay.turn_off()
         
         try:
-            # Tell Whitebeet to stop whatever it's doing
             self.whitebeet.v2gEvseStopCharging()
             self.whitebeet.v2gEvseStopListen()
         except Exception as e:
             pass
             
-        print("[USER ABORT] Hardware isolated. Returning to Idle State...\n")
+        print("(Stopped process) EVSE sent request session stop to EV\n")
     # ==========================================
 
     def _initialize(self):
@@ -141,6 +136,7 @@ class Evse():
         self.CanPhoenix.StartCanLoop()
 
         print("Start SLAC matching")
+        time.sleep(1)
         self.whitebeet.slacStartMatching()
         print("Set duty cycle to 5%")
         self.whitebeet.controlPilotSetDutyCycle(5)
@@ -616,18 +612,13 @@ class Evse():
         """
         
         while True:
-            # Clear flag if we just aborted
+          
+            self.CanPhoenix.stop()
+            
             if getattr(self, '_force_stop_flag', False):
                 time.sleep(2) 
                 self._force_stop_flag = False  
 
-            # Re-enable GC between sessions to clean up memory safely
-            if not gc.isenabled():
-                gc.enable()
-                gc.collect()
-
-            # SILENCE EVERYTHING WHILE IDLE
-            print("\n[SYSTEM] Silencing Whitebeet and clearing old sessions...")
             try:
                 self.whitebeet.v2gEvseStopListen()
                 self.whitebeet.slacStop()
@@ -635,14 +626,8 @@ class Evse():
             except Exception:
                 pass
                 
-            print("\n=======================================================")
-            print(">>> EVSE IDLE: Waiting for user to activate station <<<")
-            print("=======================================================\n")
+            print(">>> EVSE IDLE: Waiting for user press START button <<<")
             
-            # 1. WAIT FOR START BUTTON FIRST
-            print("[UI] Please press START button (P8_14) to turn on the charger...")
-            
-            # Wait while the circuit is LOW (Active-High wiring)
             while GPIO.input(self.START_PIN) == GPIO.LOW and not self._force_stop_flag:
                 time.sleep(0.1) 
             
@@ -650,23 +635,16 @@ class Evse():
                 self._force_stop_flag = False
                 continue
 
-            print("\n[UI] START button pressed! Activating CP and SLAC services...")
+            print("\nSTART button pressed! start CP and SLAC")
             
-            # 2. START THE HARDWARE READINESS
             self._initialize()
             
-            print("\n[UI] Charger Active! >>> Please plug in the EV now... <<<")
-            
-            # 3. NOW WAIT FOR THE EV TO CONNECT
             if self._waitEvConnected(None):
                 
-                # Proceed instantly to SLAC matching as soon as the cable connects
                 if not self._force_stop_flag:
-                    print("\n[UI] EV Connected! Initiating V2G SLAC matching instantly...")
                     self._handleEvConnected()
             
-            # If we get here, the session ended naturally or via the Stop button
-            print("[EVSE] Session loop exited. Resetting hardware for next EV...")
+            print("STOP button pressed! start stop cp and SLAC")
             
             try:
                 self.CanPhoenix.StopCanLoop()
