@@ -10,7 +10,7 @@ except ImportError:
     can = None
 
 
-class NiTest:
+class CanNiuera:
     """
     NIUERA V2G module CAN interface (keeps CanPhoenix-like structure).
 
@@ -424,10 +424,10 @@ class NiTest:
             time.sleep(float(period_s))
 
 if __name__ == "__main__":
-    print("Initializing NiTest...")
+    print("Initializing CanNiuera...")
     
     try:
-        charger = NiTest(interface="socketcan", channel="can2", bitrate=125000)
+        charger = CanNiuera(interface="socketcan", channel="can2", bitrate=125000)
         charger.start()
         time.sleep(1)
         charger.stop()
@@ -439,7 +439,7 @@ if __name__ == "__main__":
         print(f"Test failed (expected if vcan0 not up): {e}")
     '''
     try:
-        charger = NiTest(interface="socketcan", channel="can2", bitrate=125000, debug=False)
+        charger = CanNiuera(interface="socketcan", channel="can2", bitrate=125000, debug=False)
 
         # Make sure your limit check won't reject these
         charger.setEvseMaxVoltage(600)   # must be >= 500
