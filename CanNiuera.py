@@ -1,67 +1,44 @@
 import time
 import threading
 
-# Try to import python-can, but provide helpful error if missing
 try:
     import can
 except ImportError:
     print("Error: 'python-can' library is required but not found.")
-    print("Please install it using: pip install python-can")
     can = None
-
 
 class CanNiuera:
     """
-    NIUERA V2G module CAN interface (keeps CanPhoenix-like structure).
-
-    Identifier (29-bit):
-      PROTNO(9) + PTP(1) + DSTADDR(8) + SRCADDR(8) + GROUP(3)
-
-    Payload:
-      WRITE (SET): [0x03, 0x00, RegHi, RegLo, D0, D1, D2, D3]
-      READ:        [0x10, 0x00, RegHi, RegLo, 0x00, 0x00, 0x00, 0x00]
-      RESP:        [0x42, Err,  RegHi, RegLo, D0, D1, D2, D3]
+    NIUERA V2G module CAN interface.
     """
+    PROTNO_DEFAULT = 0x061  
 
-    # -------------------------------
-    # Protocol constants
-    # -------------------------------
-    PROTNO_DEFAULT = 0x061  # 9-bit
-
-    # PTP
-    PTP_BROADCAST = 0
+    # PTP and Addresses
     PTP_P2P = 1
-
-    # Addresses
     MONITOR_ADDR_DEFAULT = 0xF0
-    DST_BROADCAST_ALL = 0xFF
-    DST_BROADCAST_GROUP = 0xFE
 
-    # "Byte00" function codes (your requested naming)
+    # Function codes
     WRITE_BYTE00 = 0x03
     READ_BYTE00 = 0x10
     RESP_BYTE00 = 0x42
-
-    # Response status codes (byte1 in RESP)
     RESP_OK = 0xF0
-    RESP_FAIL = 0xF2
 
-    # Registers
-    REG_POWER_ONOFF = 0x0030      # 0x00000000 startup, 0x00010000 shutdown
-    REG_SET_DC_LINK_V = 0x0077    # u32 mV
-    REG_SET_DC_CURRENT = 0x0079   # s32 mA
-    REG_READ_DC_VI = 0x000F       # FIXED: Must be 0x000F for Voltage/Current
-    REG_READ_STATUS = 0x0040      # status bits (u32)
+    # Registers mapped from the manual
+    REG_POWER_ONOFF = 0x0030      #
+    REG_SET_DC_LINK_V = 0x0077    #
+    REG_SET_DC_CURRENT = 0x0079   #
+    REG_READ_DC_VI = 0x000F       #
+    REG_READ_STATUS = 0x0040      #
 
     def __init__(
         self,
         interface="socketcan",
         channel="can2",
         bitrate=125000,
-        dst_addr=0x00,               # FIXED: Target Module 0 (Point-to-Point)
+        dst_addr=0x00,               # Target Module 0 (Point-to-Point)
         src_addr=MONITOR_ADDR_DEFAULT,
         group=0,
-        ptp=1,                       # FIXED: Enable Point-to-Point
+        ptp=1,                       # Enable Point-to-Point
         debug=False,
     ):
         if can is None:
@@ -73,21 +50,18 @@ class CanNiuera:
         self.bus = None
         self.is_connected = False
 
-        # NIUERA addressing
         self.dst_addr = dst_addr & 0xFF
         self.src_addr = src_addr & 0xFF
         self.group = group & 0x07
         self.ptp = 1 if ptp else 0
-
-        # Debug prints
         self.debug = bool(debug)
 
-        # Internal state (same names style)
-        self.evse_max_voltage = 0
+        # Internal state
+        self.evse_max_voltage = 600 # Default safe maximum
         self.evse_min_voltage = 0
-        self.evse_max_current = 0
+        self.evse_max_current = 50  # Default safe maximum
         self.evse_min_current = 0
-        self.evse_max_power = 0
+        self.evse_max_power = 22000
 
         self.evse_present_voltage = 0.0
         self.evse_present_current = 0.0
@@ -105,17 +79,15 @@ class CanNiuera:
         self._stop_event = threading.Event()
         self._receive_thread = None
 
-        # Heartbeat loop (same pattern)
         self._heartbeat_active = False
         self._heartbeat_thread = None
 
-        # Try to open connection
         try:
             self.bus = can.Bus(interface=self.interface_type, channel=self.channel, bitrate=self.bitrate)
             self.is_connected = True
-            print(f"Connected to CAN interface: {self.interface_type}/{self.channel} @ {self.bitrate}")
+            print(f"[NIUERA] Connected to CAN interface: {self.interface_type}/{self.channel} @ {self.bitrate}")
         except Exception as e:
-            print(f"Failed to open CAN connection: {e}")
+            print(f"[NIUERA] Failed to open CAN connection: {e}")
 
         if self.is_connected:
             self._start_receive_thread()
@@ -131,7 +103,6 @@ class CanNiuera:
                 if msg:
                     self._process_frame(msg)
             except Exception as e:
-                print(f"[NIUERA] Error in receive loop: {e}")
                 time.sleep(0.1)
 
     @staticmethod
@@ -224,7 +195,6 @@ class CanNiuera:
 
         fc = payload[0]
 
-        # Response frame
         if fc == self.RESP_BYTE00:
             err = payload[1]
             reg = (payload[2] << 8) | payload[3]
@@ -233,7 +203,6 @@ class CanNiuera:
             if err != self.RESP_OK:
                 return
 
-            # DC V/I (strictly mapped to 0x000F)
             if reg == self.REG_READ_DC_VI:
                 v_raw = self._u16_be(d4, d5)     # 0.1V
                 i_raw = self._s16_be(d6, d7)     # 0.01A signed
@@ -246,8 +215,7 @@ class CanNiuera:
 
     def start(self):
         """Power ON (NIUERA reg 0x0030 = 0x00000000)."""
-        WRITE_BYTE00 = self.WRITE_BYTE00
-        data = [WRITE_BYTE00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00]
+        data = [self.WRITE_BYTE00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00] #
         ok = self._send(data)
         if ok:
             self.started = True
@@ -255,99 +223,63 @@ class CanNiuera:
 
     def stop(self):
         """Power OFF (NIUERA reg 0x0030 = 0x00010000)."""
-        WRITE_BYTE00 = self.WRITE_BYTE00
-        data = [WRITE_BYTE00, 0x00, 0x00, 0x30, 0x00, 0x01, 0x00, 0x00]
+        data = [self.WRITE_BYTE00, 0x00, 0x00, 0x30, 0x00, 0x01, 0x00, 0x00] #
         ok = self._send(data)
         if ok:
             self.started = False
-
-        # Best effort safety
         try:
             self.setEvTargetCurrent(0)
             self.setEvTargetVoltage(0)
         except Exception:
             pass
-
         return ok
 
     def close(self):
-        """Stops threads and closes bus."""
         self.StopCanLoop()
-
         self._stop_event.set()
         if self._receive_thread:
             self._receive_thread.join(timeout=2.0)
-
         if self.bus:
             try:
                 self.bus.shutdown()
             except Exception:
                 pass
-
         self.is_connected = False
 
     # --- Setters for EVSE Capabilities ---
-    def setEvseMaxCurrent(self, value):
-        self.evse_max_current = value
-
-    def setEvseMinCurrent(self, value):
-        self.evse_min_current = value
-
-    def setEvseMaxVoltage(self, value):
-        self.evse_max_voltage = value
-
-    def setEvseMinVoltage(self, value):
-        self.evse_min_voltage = value
-
-    def setEvseMaxPower(self, value):
-        self.evse_max_power = value
-
-    def setEvseDeltaVoltage(self, value):
-        pass
-
-    def setEvseDeltaCurrent(self, value):
-        pass
+    def setEvseMaxCurrent(self, value): self.evse_max_current = value
+    def setEvseMinCurrent(self, value): self.evse_min_current = value
+    def setEvseMaxVoltage(self, value): self.evse_max_voltage = value
+    def setEvseMinVoltage(self, value): self.evse_min_voltage = value
+    def setEvseMaxPower(self, value): self.evse_max_power = value
+    def setEvseDeltaVoltage(self, value): pass
+    def setEvseDeltaCurrent(self, value): pass
 
     # --- Setters for EV Limits ---
-    def setEvMaxCurrent(self, value):
-        self.ev_max_current = value
-
-    def setEvMinCurrent(self, value):
-        self.ev_min_current = value
-
-    def setEvMaxVoltage(self, value):
-        self.ev_max_voltage = value
-
-    def setEvMinVoltage(self, value):
-        self.ev_min_voltage = value
-
-    def setEvMinPower(self, value):
-        pass
-
-    def setEvMaxPower(self, value):
-        self.ev_max_power = value
+    def setEvMaxCurrent(self, value): self.ev_max_current = value
+    def setEvMinCurrent(self, value): self.ev_min_current = value
+    def setEvMaxVoltage(self, value): self.ev_max_voltage = value
+    def setEvMinVoltage(self, value): self.ev_min_voltage = value
+    def setEvMinPower(self, value): pass
+    def setEvMaxPower(self, value): self.ev_max_power = value
 
     # --- Dynamic Targets ---
     def setEvTargetVoltage(self, voltage):
-        """NIUERA: reg 0x0077, value=mV (u32). Input volts."""
         if self.isVoltageLimitExceeded(voltage):
+            print(f"[NIUERA] Voltage {voltage} exceeds EVSE limits!")
             return False
-
-        WRITE_BYTE00 = self.WRITE_BYTE00
         voltage_mv = int(float(voltage) * 1000.0)
         val_bytes = voltage_mv.to_bytes(4, byteorder="big", signed=False)
-        data = [WRITE_BYTE00, 0x00, 0x00, 0x77, val_bytes[0], val_bytes[1], val_bytes[2], val_bytes[3]]
+        data = [self.WRITE_BYTE00, 0x00, 0x00, 0x77, val_bytes[0], val_bytes[1], val_bytes[2], val_bytes[3]] #
         return self._send(data)
 
     def setEvTargetCurrent(self, current):
-        """NIUERA: reg 0x0079, value=mA (s32). Input amps."""
         if self.isCurrentLimitExceeded(current):
+            print(f"[NIUERA] Current {current} exceeds EVSE limits!")
             return False
-
-        WRITE_BYTE00 = self.WRITE_BYTE00
         current_ma = int(float(current) * 1000.0)
         val_bytes = current_ma.to_bytes(4, byteorder="big", signed=True)
-        data = [WRITE_BYTE00, 0x00, 0x00, 0x79, val_bytes[0], val_bytes[1], val_bytes[2], val_bytes[3]]
+        data = [self.WRITE_BYTE00, 0x00, 0x00, 0x79, val_bytes[0], val_bytes[1], val_bytes[2], val_bytes[3]] #
         return self._send(data)
 
     # --- Getters ---
@@ -365,25 +297,19 @@ class CanNiuera:
     def getEvMinPower(self): return 0
     def getEvMaxPower(self): return self.ev_max_power
 
-    # --- Real-time Values (Phoenix-like: build data locally) ---
+    # --- Real-time Values ---
     def getEvsePresentVoltage(self):
-        """Request DC V/I and return cached voltage (V)."""
-        READ_BYTE00 = self.READ_BYTE00
-        data = [READ_BYTE00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x00] # FIXED: 0x0F
+        data = [self.READ_BYTE00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x00]
         self._send(data)
         return self.evse_present_voltage
 
     def getEvsePresentCurrent(self):
-        """Request DC V/I and return cached current (A)."""
-        READ_BYTE00 = self.READ_BYTE00
-        data = [READ_BYTE00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x00] # FIXED: 0x0F
+        data = [self.READ_BYTE00, 0x00, 0x00, 0x0F, 0x00, 0x00, 0x00, 0x00]
         self._send(data)
         return self.evse_present_current
 
     def getModuleStatusBits(self):
-        """Request status bits and return cached bits."""
-        READ_BYTE00 = self.READ_BYTE00
-        data = [READ_BYTE00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00]
+        data = [self.READ_BYTE00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00]
         self._send(data)
         return self.last_status_bits
 
@@ -397,9 +323,7 @@ class CanNiuera:
     def isPowerLimitExceeded(self, power):
         return power > self.evse_max_power
 
-
-    def StartCanLoop(self, period_s=5.0, keep_alive_read=True):
-        """Keep CAN traffic alive (read DC V/I periodically)."""
+    def StartCanLoop(self, period_s=1.0, keep_alive_read=True):
         if not self._heartbeat_active:
             self._heartbeat_active = True
             self._heartbeat_thread = threading.Thread(
