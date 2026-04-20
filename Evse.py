@@ -3,7 +3,7 @@ import gc
 import threading
 from Whitebeet import *
 from CanPhoenix import *
-from RelayControl import *
+#from RelayControl import *
 
 class Evse():
     def __init__(self, iftype, iface, mac, auto_authorize=False):
