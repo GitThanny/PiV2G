@@ -1,9 +1,10 @@
 import multiprocessing
 import time
 import sys
+import binascii
 from platform import system as system_type
-from scapy.all import *
-from scapy.layers.l2 import Ether, getmacbyip, sendp
+from scapy.all import conf, get_if_hwaddr, sniff, srp1
+from scapy.layers.l2 import Ether, getmacbyip
 
 from SUTAdapter import *
 from FramingAPIDef import *
@@ -53,10 +54,7 @@ class EthernetAdapter(SUTAdapter):
     packet callback for our custom ethernet type
     """
     def pkt_callback(self, packet):
-        if system_type() == "Linux":
-            payload = Ether(packet)[Ether].load[4:]
-        else:
-            payload = packet[Ether].load[4:]
+        payload = bytes(packet)[18:]
 
         seqno = 0
 
