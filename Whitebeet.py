@@ -72,7 +72,7 @@ class Whitebeet():
         self.v2g_sub_ev_start_charging = 0xAC
         self.v2g_sub_ev_stop_charging = 0xAD
         self.v2g_sub_ev_stop_session = 0xAE
-       
+        
 
         # EVSE sub IDs
         self.v2g_sub_evse_set_configuration = 0x60
@@ -99,7 +99,7 @@ class Whitebeet():
 
         # Initialization of the framing interface
         self.framing = FramingInterface()
-        iftype =  iftype.upper()
+        iftype = iftype.upper()
 
         try:
             if iftype == 'ETH':
@@ -1306,88 +1306,87 @@ class Whitebeet():
             self._sendReceiveAck(self.v2g_mod_id, self.v2g_sub_evse_set_dc_charging_parameters, payload)
 
     def v2gEvseUpdateDcChargingParameters(self, parameters):
-            """
-            Update DC Charging Parameter
-            """
-
-            if not ('isolation_level' in parameters or isinstance(parameters['isolation_level'],int) or parameters['isolation_level'] in range(4)):
-                raise ValueError("isolation_level needs to be of type int with range 4")
-            elif not ('present_voltage' in parameters or isinstance(parameters['present_voltage'],(int, tuple))):
-                raise ValueError("present_voltage needs to be of type int or tuple")
-            elif not ('present_current' in parameters or isinstance(parameters['present_current'],(int, tuple))):
-                raise ValueError("present_current needs to be of type int or tuple")
-            elif not ('max_voltage' in parameters or isinstance(parameters['max_voltage'],(int, tuple))):
-                raise ValueError("max_voltage needs to be of type int or tuple")
-            elif not ('max_current' in parameters or isinstance(parameters['max_current'],(int, tuple))):
-                raise ValueError("max_current needs to be of type int or tuple")
-            elif not ('max_power' in parameters or isinstance(parameters['max_power'],(int, tuple))):
-                raise ValueError("max_power needs to be of type int or tuple")
-            elif not ('status' in parameters or isinstance(parameters['status'],int) or parameters['status'] in range(6)):
-                raise ValueError("status needs to be of type int with range 6")
+        """
+        Update DC Charging Parameter
+        """
+        if not ('isolation_level' in parameters or isinstance(parameters['isolation_level'],int) or parameters['isolation_level'] in range(4)):
+            raise ValueError("isolation_level needs to be of type int with range 4")
+        elif not ('present_voltage' in parameters or isinstance(parameters['present_voltage'],(int, tuple))):
+            raise ValueError("present_voltage needs to be of type int or tuple")
+        elif not ('present_current' in parameters or isinstance(parameters['present_current'],(int, tuple))):
+            raise ValueError("present_current needs to be of type int or tuple")
+        elif not ('max_voltage' in parameters or isinstance(parameters['max_voltage'],(int, tuple))):
+            raise ValueError("max_voltage needs to be of type int or tuple")
+        elif not ('max_current' in parameters or isinstance(parameters['max_current'],(int, tuple))):
+            raise ValueError("max_current needs to be of type int or tuple")
+        elif not ('max_power' in parameters or isinstance(parameters['max_power'],(int, tuple))):
+            raise ValueError("max_power needs to be of type int or tuple")
+        elif not ('status' in parameters or isinstance(parameters['status'],int) or parameters['status'] in range(6)):
+            raise ValueError("status needs to be of type int with range 6")
+        else:
+            payload = b''
+            payload += parameters['isolation_level'].to_bytes(1, "big")
+            payload += self._valueToExponential(parameters['present_voltage'])
+            payload += self._valueToExponential(parameters['present_current'])
+            
+            if 'max_voltage' in parameters:
+                payload += b'\x01'
+                payload += self._valueToExponential(parameters['max_voltage'])
             else:
-                payload = b''
-                payload += parameters['isolation_level'].to_bytes(1, "big")
-                payload += self._valueToExponential(parameters['present_voltage'])
-                payload += self._valueToExponential(parameters['present_current'])
-                
-                if 'max_voltage' in parameters:
-                    payload += b'\x01'
-                    payload += self._valueToExponential(parameters['max_voltage'])
-                else:
-                    payload += b'\x00'
+                payload += b'\x00'
 
-                if 'max_current' in parameters:
-                    payload += b'\x01'
-                    payload += self._valueToExponential(parameters['max_current'])
-                else:
-                    payload += b'\x00'
+            if 'max_current' in parameters:
+                payload += b'\x01'
+                payload += self._valueToExponential(parameters['max_current'])
+            else:
+                payload += b'\x00'
 
-                if 'max_power' in parameters:
-                    payload += b'\x01'
-                    payload += self._valueToExponential(parameters['max_power'])
-                else:
-                    payload += b'\x00'
-                
-                payload += parameters['status'].to_bytes(1, "big")
+            if 'max_power' in parameters:
+                payload += b'\x01'
+                payload += self._valueToExponential(parameters['max_power'])
+            else:
+                payload += b'\x00'
+            
+            payload += parameters['status'].to_bytes(1, "big")
 
-                self._sendReceiveAck(self.v2g_mod_id, self.v2g_sub_evse_update_dc_charging_parameters, payload)
+            self._sendReceiveAck(self.v2g_mod_id, self.v2g_sub_evse_update_dc_charging_parameters, payload)
 
     def v2gEvseUpdateDcChargingParametersFast(self, parameters):
-            """
-            FIRE-AND-FORGET version for time-critical charging loop.
-            Sends update WITHOUT waiting for response - guaranteed ~10ms.
-            Use when you need to update frequently and can't afford blocking.
-            """
-            try:
-                payload = b''
-                payload += parameters['isolation_level'].to_bytes(1, "big")
-                payload += self._valueToExponential(parameters['present_voltage'])
-                payload += self._valueToExponential(parameters['present_current'])
-                
-                if 'max_voltage' in parameters:
-                    payload += b'\x01'
-                    payload += self._valueToExponential(parameters['max_voltage'])
-                else:
-                    payload += b'\x00'
+        """
+        FIRE-AND-FORGET version for time-critical charging loop.
+        Sends update WITHOUT waiting for response - guaranteed ~10ms.
+        Use when you need to update frequently and can't afford blocking.
+        """
+        try:
+            payload = b''
+            payload += parameters['isolation_level'].to_bytes(1, "big")
+            payload += self._valueToExponential(parameters['present_voltage'])
+            payload += self._valueToExponential(parameters['present_current'])
+            
+            if 'max_voltage' in parameters:
+                payload += b'\x01'
+                payload += self._valueToExponential(parameters['max_voltage'])
+            else:
+                payload += b'\x00'
 
-                if 'max_current' in parameters:
-                    payload += b'\x01'
-                    payload += self._valueToExponential(parameters['max_current'])
-                else:
-                    payload += b'\x00'
+            if 'max_current' in parameters:
+                payload += b'\x01'
+                payload += self._valueToExponential(parameters['max_current'])
+            else:
+                payload += b'\x00'
 
-                if 'max_power' in parameters:
-                    payload += b'\x01'
-                    payload += self._valueToExponential(parameters['max_power'])
-                else:
-                    payload += b'\x00'
-                
-                payload += parameters['status'].to_bytes(1, "big")
+            if 'max_power' in parameters:
+                payload += b'\x01'
+                payload += self._valueToExponential(parameters['max_power'])
+            else:
+                payload += b'\x00'
+            
+            payload += parameters['status'].to_bytes(1, "big")
 
-                # FIRE AND FORGET - no waiting for response!
-                return self._sendNoWait(self.v2g_mod_id, self.v2g_sub_evse_update_dc_charging_parameters, payload)
-            except:
-                return False
+            # FIRE AND FORGET - no waiting for response!
+            return self._sendNoWait(self.v2g_mod_id, self.v2g_sub_evse_update_dc_charging_parameters, payload)
+        except:
+            return False
 
     def v2gEvseGetDCChargingParameters(self):
         """
@@ -1657,13 +1656,13 @@ class Whitebeet():
 
                         payload += len(sales_tariff['sales_tariff_entries']).to_bytes(2, 'big')
                         for entry in sales_tariff['sales_tariff_entries']:
-                            if not ('time_interval_start' in entry or isinstance(entry['time_interval_duration'], int) or (0 < entry['time_interval_duration'] < 16777214)):
+                            if not ('time_interval_start' in entry or isinstance(entry['time_interval_start'], int) or (0 < entry['time_interval_start'] < 16777214)):
                                 raise ValueError('time_interval_start needs to be of type int with range 0 to 16777214')
                             elif not ('time_interval_duration' in entry or isinstance(entry['time_interval_duration'], int) or (0 < entry['time_interval_duration'] < 86400)):
                                 raise ValueError('time_interval_duration needs to be of type int with range 0 to 86400')
-                            elif not ('price_level' in schedule or isinstance(entry['price_level'], int) or (0 <= entry['price_level'] <= 255)):
+                            elif not ('price_level' in entry or isinstance(entry['price_level'], int) or (0 <= entry['price_level'] <= 255)):
                                 raise ValueError('price_level needs to be of type int with range 0 to 255')
-                            elif not ('consumption_costs' in schedule or isinstance(entry['consumption_costs'], list) or (1 <= len(entry['consumption_costs']) <= 3)):
+                            elif not ('consumption_costs' in entry or isinstance(entry['consumption_costs'], list) or (1 <= len(entry['consumption_costs']) <= 3)):
                                 raise ValueError('consumption_costs needs to be of type list with length between 1 and 3')
                             else:
 
@@ -2054,7 +2053,7 @@ class Whitebeet():
         Parse a stop charging requested message.
         Will return a dictionary with the following keys:
         timeout             int
-        renegotiation      bool
+        renegotiation       bool
         """
         message = {}
         self.payloadReaderInitialize(data, len(data))
