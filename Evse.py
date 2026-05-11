@@ -9,8 +9,11 @@ class Evse():
     def __init__(self, iftype, iface, mac, auto_authorize=False):
         self.whitebeet = Whitebeet(iftype, iface, mac)
         print(f"WHITE-beet-EI firmware version: {self.whitebeet.version}")
+        
+        # NOTE: Make sure RelayControl is imported or available in your scope!
         self.relay = RelayControl("P8_17")
         self.relay.turn_on()
+        
         self.CanPhoenix = CanPhoenix()
         self.CanPhoenix.StartCanLoop()
         self.schedule = None
@@ -43,7 +46,6 @@ class Evse():
         to 100%. The SLAC module is also started. This one needs ~1s to 2s to be ready.
         Therefore we delay the initialization by 2s.
         """
-
         print("Set the CP mode to EVSE")
         self.whitebeet.controlPilotSetMode(1)
         print("Set the CP duty cycle to 100%")
@@ -71,8 +73,12 @@ class Evse():
             print("Wait until an EV connects")
             while True:
                 cp_state = self.whitebeet.controlPilotGetState()
-                if timeout != None and timestamp_start + timeout > time.time():
+                
+                # FIXED: The timeout logic (must wait until current time exceeds start time + timeout)
+                if timeout is not None and time.time() > (timestamp_start + timeout):
+                    print("Timeout: EV did not connect in time.")
                     return False
+                
                 if cp_state == 0:
                     time.sleep(0.1)
                 elif cp_state == 1:
@@ -146,6 +152,7 @@ class Evse():
         time.sleep(0.1)
         print("Start V2G")
         self.whitebeet.v2gEvseStartListen()
+        
         while True:
             if self.charging:
                 
@@ -171,8 +178,10 @@ class Evse():
                     'status': 0,
                 }
 
-                                # ===== DEBUG TIMING: Update =====
+                # FIXED: Proper Indentation for the Update Block
+                # ===== DEBUG TIMING: Update =====
                 update_start = time.time()
+                
                 # Use FAST version - fire and forget, no waiting
                 update_ok = self.whitebeet.v2gEvseUpdateDcChargingParametersFast(charging_parameters)
                 if not update_ok:
@@ -181,19 +190,12 @@ class Evse():
                         self.whitebeet.v2gEvseUpdateDcChargingParameters(charging_parameters)
                     except:
                         pass
+                
                 update_time = (time.time() - update_start) * 1000
 
                 # Timing monitoring - ALWAYS log for debugging
                 total_time = (time.time() - loop_start) * 1000
                 self._poll_count += 1
-                
-                
-                # NOTE: GC is DISABLED during charging (see line 148)
-                # DO NOT call gc.collect() here - it takes 832ms and causes Session Error 23!
-                # Memory can safely grow for a 30-60 min charging session
-                
-                # Log EVERY iteration until we find the problem
-                # print(f"[LOOP#{self._poll_count}] recv:{recv_time:.0f}ms upd:{update_time:.0f}ms total:{total_time:.0f}ms id:{id}")
                 
                 if total_time > 400:
                     print(f"[TIMING WARNING] Loop took {total_time:.0f}ms (should be < 500ms)")
@@ -201,7 +203,8 @@ class Evse():
             else:
                 id, data = self.whitebeet.v2gEvseReceiveRequest()
 
-            if id == None or data == None:
+            # Process the received message
+            if id is None or data is None:
                 pass
             elif id == 0x80:
                 self._handleSessionStarted(data)
@@ -243,6 +246,7 @@ class Evse():
             else:
                 print("Message ID not supported: {:02x}".format(id))
                 break
+                
         self.whitebeet.v2gEvseStopListen()
 
     def _handleSessionStarted(self, data):
@@ -370,7 +374,7 @@ class Evse():
         print("\"Request Schedules\" received")
         message = self.whitebeet.v2gEvseParseSchedulesRequested(data)
         print("Max entries: {}".format(message['max_entries']))
-        maxEntry = max([len(self.schedule), message['max_entries']])
+        maxEntry = max([len(self.schedule) if self.schedule else 0, message['max_entries']])
         print("Set the schedule: {}".format(self.schedule))
         try:
             self.whitebeet.v2gEvseSetSchedules(self.schedule)
