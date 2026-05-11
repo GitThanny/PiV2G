@@ -11,8 +11,8 @@ class Evse():
         print(f"WHITE-beet-EI firmware version: {self.whitebeet.version}")
         
         # NOTE: Make sure RelayControl is imported or available in your scope!
-        self.relay = RelayControl("P8_17")
-        self.relay.turn_on()
+        #self.relay = RelayControl("P8_17")
+        #self.relay.turn_on()
         
         self.CanPhoenix = CanPhoenix()
         self.CanPhoenix.StartCanLoop()
@@ -475,7 +475,7 @@ class Evse():
         Handle the RequestCableCheck notification
         """
         self.charging = True
-        self.relay.turn_on()
+        #self.relay.turn_on()
         print("\"Request Cable Check Status\" received")
         self.whitebeet.v2gEvseParseCableCheckRequested(data)
         try:
@@ -516,7 +516,7 @@ class Evse():
         """
         Handle the RequestStopCharging notification
         """
-        self.relay.turn_off()
+        #self.relay.turn_off()
         print("\"Request Stop Charging\" received")
         message = self.whitebeet.v2gEvseParseStopChargingRequested(data)
         print('Timeout: {}'.format(message['timeout']))
@@ -540,7 +540,7 @@ class Evse():
         """
         Handle the SessionStopped notification
         """
-        self.relay.turn_off()
+        #self.relay.turn_off()
         self.charging = False
         print("\"Session stopped\" received")
         message = self.whitebeet.v2gEvseParseSessionStopped(data)
@@ -551,7 +551,7 @@ class Evse():
         """
         Handle the SessionError notification
         """
-        self.relay.turn_off()
+        #self.relay.turn_off()
         print("\"Session Error\" received")
         self.charging = False
         message = self.whitebeet.v2gEvseParseSessionError(data)
