@@ -1,16 +1,10 @@
 import multiprocessing
 import time
 import sys
-import binascii
-from platform import system as system_type
-from scapy.all import conf, get_if_hwaddr, sniff, srp1
-from scapy.layers.l2 import Ether, getmacbyip
+from scapy.all import conf, Ether, sniff, get_if_hwaddr, Raw
 
 from SUTAdapter import *
 from FramingAPIDef import *
-
-if system_type() == "Linux":
-    from pylibpcap.base import Sniff
 
 class EthernetAdapter(SUTAdapter):
     def __init__(self):
@@ -18,136 +12,108 @@ class EthernetAdapter(SUTAdapter):
         self.queue_rx = multiprocessing.Manager().Queue()
         self.queue_tx = multiprocessing.Manager().Queue()
 
-        self.sut_ip = ""
+        self.sut_ip = "" # Kept for backward compatibility with FreeV2G arguments
         self.sut_interface = ""
         self.dut_mac = None
         self.packet = None
         self.socket = None
-        conf.use_pcap=True
+        
+        # Force Scapy to use its native capture engine
+        conf.use_pcap = True
 
-
-    """
-    send data
-    """
     def send(self, data):
         if len(data) > 1450:
             print("Alert: Sending large frame")
 
-        if system_type() == "Linux":
-            self.socket.send(self.packet/(b"\x00\x04" + len(data).to_bytes(2, "big") + data))
-        else:
-            global socket
-            socket.send(self.packet/(b"\x00\x04" + len(data).to_bytes(2, "big") + data))
+        # Use Scapy's native L2 socket to send the payload
+        # b"\x00\x04" is the White-beet Control Header version/type
+        self.socket.send(self.packet / (b"\x00\x04" + len(data).to_bytes(2, "big") + data))
 
-
-    """
-    receive data
-    """
     def receive(self):
         if not self.queue_rx.empty():
-            frame = self.queue_rx.get_nowait()
-            return frame
-        else:
-            return None
+            return self.queue_rx.get_nowait()
+        return None
 
-    """
-    packet callback for our custom ethernet type
-    """
     def pkt_callback(self, packet):
-        payload = bytes(packet)[18:]
+        try:
+            # Extract everything after the Ethernet header
+            raw_data = bytes(packet[Ether].payload)
+            if len(raw_data) < 5:
+                return None
+            
+            # Strip the 4-byte Control Header to get to the Framing Protocol
+            payload = raw_data[4:]
 
-        seqno = 0
+            # Check for the Start of Frame marker (0xC0)
+            marker = payload[0]
+            if marker != START_OF_FRAME:
+                return None
 
-        # check for input on uart
-        marker = payload[0]
+            pheader = payload[1:6]
+            pbytes = int.from_bytes(pheader[3:5], 'big')
 
-        # if nothing there, return to receive control
-        if not marker or marker != START_OF_FRAME:
-            return None
+            pbytedata = b""
+            if pbytes > 0:
+                pbytedata = payload[6:6+pbytes]
 
-        pheader = payload[1:6]
-        pbytes = int.from_bytes(pheader[3:5], 'big')
+            pdata = pheader + pbytedata if pbytes > 0 else pheader
+            pbytes_total = pbytes + 5
 
-        pbytedata = 2
-        if pbytes > 0:
-            pbytedata = payload[6:6+pbytes]
+            crc = int.from_bytes(payload[pbytes_total+1:pbytes_total+2], "big")
+            end_marker = payload[pbytes_total+2]
 
-        if not pbytedata:
-            print("Had to cancel data reception mid frame")
-            return None
+            # Check for the End of Frame marker (0xC1)
+            if end_marker == END_OF_FRAME:
+                frame = self.pack_and_parse_frame(
+                    b"\xc0" + pdata + crc.to_bytes(1, "big") + b"\xc1"
+                )
+                self.queue_rx.put_nowait(frame)
+            else:
+                print("Could not catch end of frame")
+                
+        except Exception as e:
+            # Prevent malformed packets from crashing the background sniffing process
+            pass
 
-        pdata = (pheader + pbytedata) if pbytes > 0 else pheader
-        pbytes += 5
-
-        crc = int.from_bytes(payload[pbytes+1:pbytes+2], "big")
-        marker = int.from_bytes(payload[pbytes+2:pbytes+3], "big")
-
-        if marker == END_OF_FRAME:
-            frame = self.pack_and_parse_frame(
-                b"\xc0" + pdata + crc.to_bytes(1, "big") + b"\xc1")
-
-            self.queue_rx.put_nowait(frame)
-        else:
-            print("Could not catch end of frame")
-            print(str(payload))
-
-    """
-    filter packets with custom ethernet type
-    """
     def process_receive(self):
-        if system_type() == "Linux":
-            sniffobj = Sniff(self.sut_interface, filters="ether proto 0x6003 and ether src " + self.dut_mac, promisc=1)
-            for plen, t, buf in sniffobj.capture():
-                self.pkt_callback(buf)
-        else:
-            sniff(filter='ether proto 0x6003 and ether src ' + self.dut_mac, iface=self.sut_interface,
-                prn=self.pkt_callback)
+        # Pure Python Scapy Sniffing - No pylibpcap required!
+        sniff(
+            filter=f"ether proto 0x6003 and ether src {self.dut_mac}",
+            iface=self.sut_interface,
+            prn=self.pkt_callback,
+            store=0 # CRITICAL: Don't store packets in RAM, process and drop them
+        )
 
-    """
-    start process waiting for mac frames of specific ethernet type
-    """
     def start(self):
+        # Handle FreeV2G sometimes passing the MAC string into the sut_ip variable
+        if self.dut_mac is None and self.sut_ip and ":" in self.sut_ip:
+            self.dut_mac = self.sut_ip
 
+        if self.dut_mac is None:
+            raise AssertionError("[!] Target MAC address not set! Ensure you use '-m MAC_ADDRESS'")
+
+        # Initialize the Scapy Layer 2 Socket
+        self.socket = conf.L2socket(iface=self.sut_interface)
+        
+        # Pre-build the Ethernet packet target (Source MAC is auto-filled by Scapy)
+        self.packet = Ether(src=get_if_hwaddr(self.sut_interface), dst=self.dut_mac, type=0x6003)
+
+        # Start the sniffing listener in a background CPU process
         self.recv_process = multiprocessing.Process(target=self.process_receive)
-
-        end_time = time.time() + 10
-
-        while self.dut_mac == None and time.time() < end_time:
-            self.dut_mac = getmacbyip(self.sut_ip)
-
-        if self.dut_mac == None:
-            raise AssertionError("[]!] Could not determine target MAC address from IP")
-
-        if system_type() == "Linux":
-            self.socket = conf.L2socket(iface=self.sut_interface)
-            self.packet = Ether(src=get_if_hwaddr(self.sut_interface), dst=self.dut_mac, type=0x6003)
-        else:
-            global socket
-            socket = conf.L2socket(iface=self.sut_interface)
-            self.packet = Ether(dst=self.dut_mac, type=0x6003)
-
         self.recv_process.start()
 
-        """
-        sleep - letting sniffing process initialize
-        """
-        time.sleep(3)
+        # Let the sniffing process initialize
+        time.sleep(1)
 
-    """
-    stop listening for specific ethernet type
-    """
     def stop(self):
-        self.recv_process.terminate()
+        if self.recv_process:
+            self.recv_process.terminate()
+        if self.socket:
+            self.socket.close()
 
-    """
-    returns true if data is available
-    """
     def holding_data(self):
         return not self.queue_rx.empty()
 
-    """
-    clearing queues
-    """
     def clear_queues(self):
         while not self.queue_rx.empty():
-            msg = self.queue_rx.get_nowait()
+            self.queue_rx.get_nowait()
