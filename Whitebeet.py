@@ -3,7 +3,6 @@
 #from multiprocessing import Value
 import time
 import struct
-from Logger import *
 from FramingInterface import *
 
 class Whitebeet():
